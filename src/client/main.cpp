@@ -35,7 +35,7 @@ bool isMainMenuRunning = false;
 
 // 用于读写线程之间的通信
 sem_t rwsem;
-// 记录登录状态
+// 记录登录状态  CS原子类型，没有必要用互斥锁
 atomic_bool g_isLoginSuccess{false};
 
 // 接收线程
@@ -77,6 +77,7 @@ int main(int argc, char **argv)
     server.sin_addr.s_addr = inet_addr(ip);
 
     // client和server进行连接
+    // 客户端一个socket，服务器多个socket
     if (-1 == connect(clientfd, (sockaddr *)&server, sizeof(sockaddr_in)))
     {
         cerr << "connect server error" << endl;
@@ -84,11 +85,11 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
-    // 初始化读写线程通信用的信号量
-    sem_init(&rwsem, 0, 0);
+    // 初始化读写线程通信用的信号量   //线程通信，初始计数为0
+    sem_init(&rwsem, 0, 0); 
 
-    // 连接服务器成功，启动接收子线程
-    std::thread readTask(readTaskHandler, clientfd); // pthread_create
+    // 主线程连接服务器成功，子线程启动接收received
+    std::thread readTask(readTaskHandler, clientfd); // pthread_create  
     readTask.detach();                               // pthread_detach  线程运行完，自动回收。线程调用的tcp资源
 
     // main线程用于接收用户输入，负责发送数据
@@ -124,14 +125,14 @@ int main(int argc, char **argv)
             string request = js.dump();
 
             g_isLoginSuccess = false;
-
+            //主线程向服务器发送socket，子线程处理接受数据
             int len = send(clientfd, request.c_str(), strlen(request.c_str()) + 1, 0);
             if (len == -1)
             {
                 cerr << "send login msg error:" << request << endl;
             }
-
-            sem_wait(&rwsem); // 等待信号量，由子线程处理完登录的响应消息后，通知这里
+            //主线程阻塞等待子线程，
+            sem_wait(&rwsem); // 等待信号量，由子线程处理完登录的响应消息后，通知这里 //没有得到会阻塞
 
             if (g_isLoginSuccess)
             {
@@ -155,7 +156,7 @@ int main(int argc, char **argv)
             js["name"] = name;
             js["password"] = pwd;
             string request = js.dump(); // json 序列号成字符串
-
+            //主线程只发送，子线程处理接受数据
             int len = send(clientfd, request.c_str(), strlen(request.c_str()) + 1, 0);
             if (len == -1)
             {

@@ -28,10 +28,9 @@ ChatService::ChatService()
         // 连接redis服务器
     if (redis_.connect())
     {
-        // 设置上报消息的回调
+        // 设置上报消息的回调  //redis 调用该类方法
         redis_.init_notify_handler(std::bind(&ChatService::handleRedisSubscribeMessage, this, _1, _2));
     }
-
 }
 MsgHandler ChatService::GetHandler(int msg_id)
 {
@@ -41,20 +40,22 @@ MsgHandler ChatService::GetHandler(int msg_id)
         // 返回一个默认的处理器
         return [=](const TcpConnectionPtr &conn, json &js, Timestamp)
         {
-            LOG_ERROR << "msgid:" << msg_id << "can not find handler!";
+            LOG_ERROR << "msgid:" << msg_id << "can not find handler!"; // 记录错误日志，msgid没有对应的事件处理
         };
     }
     else
     {
-        return msg_handler_map_[msg_id]; // 记录错误日志，msgid没有对应的事件处理
+        return msg_handler_map_[msg_id]; 
     }
 }
 
+// 由redis 调用
 void ChatService::handleRedisSubscribeMessage(int userid, string msg)
 {
+   //需要再判断，用户可能下线
     lock_guard<mutex> lock(conn_mutex_);
         auto it = user_conn_map_.find(userid);
-        if (it != user_conn_map_.end())
+        if (it != user_conn_map_.end()) //找到用户的connect
         {
             it->second->send(msg);
             return;
@@ -83,7 +84,7 @@ void ChatService::login(const TcpConnectionPtr &conn, json &js, Timestamp time)
         {
             json response; // 登陆失败
             response["msgid"] = LOGIN_MSG_ACK;
-            response["errno"] = 2;                                        // 如果为-1表示注册失败
+            response["errno"] = 2;                                        
             response["errmsg"] = "this account is using, input another!"; // 如果为-1表示注册失败
             conn->send(response.dump());                                  // 返回客户端
         }
@@ -196,6 +197,8 @@ void ChatService::reg(const TcpConnectionPtr &conn, json &js, Timestamp time)
 }
 void ChatService::Onchat(const TcpConnectionPtr &conn, json &js, Timestamp time)
 {
+   
+   // 如果在该服务器直接发送
     int toid = js["toid"].get<int>();
     {
         lock_guard<mutex> lock(conn_mutex_);
@@ -208,10 +211,11 @@ void ChatService::Onchat(const TcpConnectionPtr &conn, json &js, Timestamp time)
         }
     }
 
+    // 如果在其他服务器，通过redis中间件发送 ，每一个登录的用户都会订阅该用户的id信息
    // 查询toid是否在线 
     User user = user_model_.query(toid);
     if (user.GetState() == "online")
-    {
+    {   //发布的过程中，用户可能断开离线，所以回调时，需要再判断
         redis_.publish(toid, js.dump());    //给其他服务器发消息，其他服务器订阅
         return;
     }

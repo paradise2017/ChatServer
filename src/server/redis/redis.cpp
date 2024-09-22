@@ -23,6 +23,7 @@ Redis::~Redis()
 bool Redis::connect()
 {
     // 负责publish发布消息的上下文连接
+    // Redis的默认端口是6379
     _publish_context = redisConnect("127.0.0.1", 6379);
     if (nullptr == _publish_context)
     {
@@ -49,7 +50,7 @@ bool Redis::connect()
     return true;
 }
 
-// 向redis指定的通道channel发布消息
+// 向redis指定的通道channel发布消息  不会阻塞
 bool Redis::publish(int channel, string message)
 {
     //下面三个函数的调用 把命令写到本地缓存，
@@ -84,7 +85,7 @@ bool Redis::subscribe(int channel)
             return false;
         }
     }
-    // redisGetReply
+    // redisGetReply 阻塞的方式等待远端响应，
 
     return true;
 }
@@ -114,6 +115,7 @@ bool Redis::unsubscribe(int channel)
 void Redis::observer_channel_message()
 {
     redisReply *reply = nullptr;
+    //redisGetReply 函数会阻塞，  死循环，
     while (REDIS_OK == redisGetReply(this->_subcribe_context, (void **)&reply))
     {
         // 订阅收到的消息是一个带三元素的数组
